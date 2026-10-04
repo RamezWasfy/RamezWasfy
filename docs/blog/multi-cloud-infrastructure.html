@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>One reviewed infrastructure workflow for AWS and GCP | Ramez Wasfy</title><meta name="description" content="Why Terragrunt and Atlantis: repository structure, AWS and GCP state, dependencies, reviewed plans, and Prometheus monitoring."><link rel="canonical" href="https://ramezwasfy.github.io/RamezWasfy/blog/multi-cloud-infrastructure.html"><meta property="og:title" content="One reviewed infrastructure workflow for AWS and GCP"><meta property="og:description" content="Why Terragrunt and Atlantis: repository structure, AWS and GCP state, dependencies, reviewed plans, and Prometheus monitoring."><meta property="og:type" content="article"><meta property="og:url" content="https://ramezwasfy.github.io/RamezWasfy/blog/multi-cloud-infrastructure.html"><meta name="twitter:card" content="summary"><link rel="icon" href="/RamezWasfy/favicon.svg" type="image/svg+xml"><meta name="theme-color" content="#121212"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400..900&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"><link rel="stylesheet" href="/RamezWasfy/styles.css?v=20261003a"><script>(function(d){d.classList.add('js');if(document.visibilityState==='visible'&&!matchMedia('(prefers-reduced-motion: reduce)').matches)d.classList.add('motion');try{var t=localStorage.getItem('ramez-theme');if(t==='light'||t==='dark')d.dataset.theme=t}catch(e){}})(document.documentElement)</script><script src="/RamezWasfy/site.js?v=20261003a" defer></script><link rel="stylesheet" href="/RamezWasfy/visuals.css?v=20261003a"><script src="/RamezWasfy/visuals.js?v=20261003a" defer></script><script src="/RamezWasfy/observability.js?v=20261003a" defer></script><script src="/RamezWasfy/finops.js?v=20261003a" defer></script><script type="application/ld+json">{"@context": "https://schema.org", "@type": "BlogPosting", "headline": "One reviewed infrastructure workflow for AWS and GCP", "description": "Why Terragrunt and Atlantis: repository structure, AWS and GCP state, dependencies, reviewed plans, and Prometheus monitoring.", "author": {"@type": "Person", "name": "Ramez Wasfy", "url": "https://ramezwasfy.github.io/RamezWasfy"}, "datePublished": "2026-09-30", "dateModified": "2026-10-02", "mainEntityOfPage": "https://ramezwasfy.github.io/RamezWasfy/blog/multi-cloud-infrastructure.html"}</script></head>
+<body class="page-note line-i"><a class="skip" href="#main">Skip to content</a><header class="band"><div class="band-inner"><a class="brand" href="/RamezWasfy/"><svg class="brand-mark" viewBox="0 0 28 28" width="28" height="28" aria-hidden="true" focusable="false"><path d="M0 14h28" stroke="#2bb865" stroke-width="5"/><path d="M14 0v28" stroke="#5b8cff" stroke-width="5"/><circle cx="14" cy="14" r="7" fill="#f4f3ef" stroke="#121212" stroke-width="3"/></svg><span>Ramez Wasfy</span></a><span class="band-role">Infrastructure and platform engineering</span><nav class="site-nav" aria-label="Main navigation"><a href="/RamezWasfy/#work">Work</a><a href="/RamezWasfy/#writing">Notes</a><a href="/RamezWasfy/#about">Background</a><a href="/RamezWasfy/#contact">Contact</a></nav><button class="theme-toggle" type="button" aria-label="Use dark theme"><span class="theme-label">Dark</span></button></div></header>
+<main id="main" class="article">
+<div class="wrap"><header class="panel article-header"><a class="back-link" href="/RamezWasfy/#writing"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M14 8H3M7 4 3 8l4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>All engineering notes</a><h1>One reviewed infrastructure workflow for AWS and GCP</h1><p class="lede">Why we picked Terraform, Terragrunt, and Atlantis, how we organized state and reusable modules, and how we kept an eye on the whole workflow with Prometheus and Grafana.</p><p class="meta"><span class="meta-line"><span class="bullet bullet-sm line-i" aria-hidden="true">I</span>Infrastructure delivery</span><span>Infrastructure as code</span><span>13 min read</span></p><p class="note">This comes from my own project work and notes. I&#x27;ve generalized names and identifiers, and I point out where an example is reconstructed or an improvement is a proposal rather than something we shipped.</p><nav class="route" aria-label="Infrastructure delivery line"><p class="route-count">Stop 1 of 2</p><ol style="--n:2"><li class="is-current is-interchange"><span class="route-stop" aria-current="page"><span class="route-ring" aria-hidden="true"></span><span class="route-label">AWS and GCP workflow</span><span class="vh"> (this note)</span></span></li><li><a class="route-stop" href="/RamezWasfy/blog/versioned-modules.html"><span class="route-ring" aria-hidden="true"></span><span class="route-label">Versioned modules</span><span class="vh">: Versioned Terraform modules and checks before review</span></a></li></ol></nav></header></div>
+<div class="reading-layout"><aside class="reading-nav"><details class="contents" open><summary>In this article</summary><nav aria-label="Article contents"><ol><li><a href="#the-problem-before-a-centralized-workflow"><span class="toc-ring" aria-hidden="true"></span><span>The problem before a centralized workflow</span></a></li><li><a href="#give-each-tool-a-narrow-responsibility"><span class="toc-ring" aria-hidden="true"></span><span>Give each tool a narrow responsibility</span></a></li><li><a href="#why-terragrunt-was-useful-for-our-repository"><span class="toc-ring" aria-hidden="true"></span><span>Why Terragrunt was useful for our repository</span></a></li><li><a href="#state-design-mattered-as-much-as-directory-design"><span class="toc-ring" aria-hidden="true"></span><span>State design mattered as much as directory design</span></a></li><li><a href="#why-atlantis-and-what-an-ordinary-change-looked-like"><span class="toc-ring" aria-hidden="true"></span><span>Why Atlantis, and what an ordinary change looked like</span></a></li><li><a href="#project-discovery-and-change-impact"><span class="toc-ring" aria-hidden="true"></span><span>Project discovery and change impact</span></a></li><li><a href="#two-locks-two-different-recovery-decisions"><span class="toc-ring" aria-hidden="true"></span><span>Two locks, two different recovery decisions</span></a></li><li><a href="#how-we-connected-prometheus-and-grafana"><span class="toc-ring" aria-hidden="true"></span><span>How we connected Prometheus and Grafana</span></a></li><li><a href="#how-i-would-phase-the-migration"><span class="toc-ring" aria-hidden="true"></span><span>How I would phase the migration</span></a></li></ol></nav></details></aside><div class="article-body"><p>At CLARK, I worked on infrastructure across AWS and GCP. I designed a dedicated infrastructure workflow and led the migration of our infrastructure code into the repository it managed. The goal was practical: an engineer should be able to propose a change, see what it does, get a real review, and apply it through a predictable process.</p>
+<p>AWS was our main cloud; GCP ran a few specific services. We didn&#x27;t try to hide the differences between them. An AWS account and a GCP project have different identity and resource models. What we wanted to standardize was how people worked with infrastructure.</p>
+<p>The design had four layers. Terraform described resources. Reusable modules captured patterns we&#x27;d settled on. Terragrunt wired those modules to environments and dependencies. Atlantis tied execution to pull-request review. Guides and checks around it made the workflow usable by the rest of engineering.</p>
+<h2 id="the-problem-before-a-centralized-workflow">The problem before a centralized workflow</h2>
+<p>The tricky part of infrastructure collaboration is usually the gap between the code in Git and the command someone actually runs. When people plan and apply locally, the person at the keyboard holds a lot of context: which credentials they used, which directory they were in, which tool versions they had, and whether the output they pasted still matches the latest commit.</p>
+<p>A reviewer can read an HCL diff, but the diff doesn&#x27;t show every consequence. A small input change can replace a resource, change permissions, or ripple into a dependent stack. The plan needs to be visible where the review happens.</p>
+<p>Our internal decision guides named repeated manual steps, review quality, coordination, and auditability as the reasons to adopt Atlantis. After that, we pointed engineers to the centralized workflow and discouraged local applies. Those are the problems the process solved. I&#x27;m not going to dress them up as a story about a particular outage I can&#x27;t point to.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Comparison table"><table><thead><tr><th scope="col">Workflow concern</th><th scope="col">Why it mattered</th><th scope="col">Design response</th></tr></thead><tbody><tr><td>Repeated backend and provider configuration</td><td>Small differences across environments become difficult to review</td><td>Shared Terragrunt configuration with explicit environment inputs</td></tr><tr><td>Plans produced outside the review</td><td>Reviewers may not see the operation they are approving</td><td>Atlantis plan output attached to the pull request</td></tr><tr><td>Different local execution contexts</td><td>Credentials and versions can differ between engineers</td><td>A controlled automation runtime and documented tool versions</td></tr><tr><td>Two pull requests touching the same project</td><td>Work needs coordination before an apply</td><td>Atlantis project locks plus backend state locking during relevant operations</td></tr><tr><td>Module changes affecting many environments</td><td>A shared source change can have a broad reach</td><td>Separate module releases and explicit consumer version upgrades</td></tr><tr><td>Changes applied without a clear record</td><td>Reconstructing the decision becomes harder</td><td>Pull-request discussion, approvals, execution output, and merge history</td></tr></tbody></table></div>
+<p>Automation didn&#x27;t remove the need to understand a change. It gave that understanding one consistent place to happen.</p>
+<h2 id="give-each-tool-a-narrow-responsibility">Give each tool a narrow responsibility</h2>
+<p>Terraform expressed the desired resources and worked out the provider-level change. Modules described patterns like networking, Kubernetes services, or a platform component, each with clear inputs, outputs, and compatibility expectations.</p>
+<p>Terragrunt was the composition layer. It cut down repeated backend and provider setup, loaded contextual inputs, picked the module source, and read outputs from the units it depended on.</p>
+<p>Atlantis handled collaboration and execution. It mapped repository changes to projects, ran the configured plan workflow, posted the result, and let approved changes be applied through pull-request commands.</p>
+<section class="article-visual" id="visual-cloud-workflow" data-visual="flow" data-key="cloud-workflow" aria-labelledby="visual-title-cloud-workflow"><div class="visual-heading"><h3 id="visual-title-cloud-workflow">Follow one infrastructure change</h3><p>Choose a provider and inspect each step. The review process is shared; provider configuration remains explicit.</p></div><label class="visual-label">Provider<select class="visual-mode"><option>AWS</option><option>GCP</option></select></label><div class="flow-nodes"><button type="button" class="flow-node" data-step="0" aria-pressed="true"><span class="node-number">01</span><span>Change a unit</span><small>Infrastructure repository</small></button><button type="button" class="flow-node" data-step="1" aria-pressed="false"><span class="node-number">02</span><span>Load configuration</span><small>Terragrunt</small></button><button type="button" class="flow-node" data-step="2" aria-pressed="false"><span class="node-number">03</span><span>Produce the plan</span><small>Atlantis + Terraform</small></button><button type="button" class="flow-node" data-step="3" aria-pressed="false"><span class="node-number">04</span><span>Review the impact</span><small>Engineers + policy checks</small></button><button type="button" class="flow-node" data-step="4" aria-pressed="false"><span class="node-number">05</span><span>Apply the artifact</span><small>Atlantis</small></button><button type="button" class="flow-node" data-step="5" aria-pressed="false"><span class="node-number">06</span><span>Verify the result</span><small>Service owner</small></button></div><div class="flow-detail" aria-live="polite"><h4>Change a unit</h4><p>A leaf unit selects a released module and declares environment inputs. Its path identifies the provider and deployment scope.</p><pre><code>AWS: account / region / environment / component
+GCP: project / region / environment / component</code></pre></div><p class="flow-mode-note"></p><script type="application/json" class="visual-config">{"title": "Follow one infrastructure change", "caption": "Choose a provider and inspect each step. The review process is shared; provider configuration remains explicit.", "selector": ["Provider", "AWS", "GCP"], "steps": [["Change a unit", "Infrastructure repository", "A leaf unit selects a released module and declares environment inputs. Its path identifies the provider and deployment scope.", "AWS: account / region / environment / component\nGCP: project / region / environment / component"], ["Load configuration", "Terragrunt", "Inherited configuration supplies backend and provider settings. Dependency blocks read outputs from other units.", "include -> shared configuration\ndependency -> upstream outputs"], ["Produce the plan", "Atlantis + Terraform", "Project detection selects the units to plan. The plan is written to an artifact and shown in the pull request.", "terragrunt plan -out=$PLANFILE"], ["Review the impact", "Engineers + policy checks", "Inspect replacements, deletes, permissions, and dependencies. In our configuration, approval and mergeability gated the apply.", "approved + mergeable\nplan JSON -> configured policy stage"], ["Apply the artifact", "Atlantis", "The apply uses the saved plan. Backend locks and Atlantis project locks have different roles.", "terragrunt apply $PLANFILE"], ["Verify the result", "Service owner", "Inspect the operation result and service health. Automation metrics and application metrics answer different questions.", "/metrics -> ServiceMonitor -> Prometheus -> Grafana"]]}</script></section>
+<p>Keeping those jobs separate made debugging much easier. A wrong module input is a different problem from a bad project mapping or a missing cloud permission, and you want to be able to tell which one you&#x27;re looking at.</p>
+<h2 id="why-terragrunt-was-useful-for-our-repository">Why Terragrunt was useful for our repository</h2>
+<p>The infrastructure tree had several dimensions: provider, account or project, region, environment, and component. Copying the same backend and provider blocks into every component would have meant a lot of repeated configuration.</p>
+<p>Terragrunt let us centralize the common behavior while keeping context next to the deployment. Our AWS hierarchy had common, account, region, and environment variable files. Provider generation folded metadata like owner, cost center, and environment into resource tags.</p>
+<p>A generalized layout looks like this:</p>
+<div class="code-block"><span class="code-label">text</span><pre><code>infrastructure/
+  aws/
+    terragrunt.hcl                 # shared AWS configuration
+    common.tfvars
+    accounts/
+      development/
+        account.tfvars
+        eu-central-1/
+          region.tfvars
+          staging/
+            environment.tfvars
+            network/terragrunt.hcl
+            application/terragrunt.hcl
+  gcp/
+    terragrunt.hcl                 # shared GCP configuration
+    common.tfvars
+    projects/
+      analytics/
+        project.tfvars
+        europe-west1/
+          staging/
+            dataset/terragrunt.hcl
+
+terraform-modules/
+  modules/aws/
+  modules/gcp/
+  stacks/</code></pre></div>
+<h3 id="shared-configuration-without-hiding-deployment-scope">Shared configuration without hiding deployment scope</h3>
+<p>The directory structure made provider and environment scope obvious. Shared configuration generated the backend and provider wiring; each leaf unit picked a module and supplied its inputs.</p>
+<p>Here&#x27;s a reconstructed leaf unit, with generic paths and a placeholder module source:</p>
+<div class="code-block"><span class="code-label">hcl</span><pre><code>include &quot;provider&quot; {
+  path = find_in_parent_folders(&quot;terragrunt.hcl&quot;)
+}
+
+terraform {
+  source = &quot;git::https://example.com/engineering/terraform-modules.git//modules/aws/application?ref=v2.4.1&quot;
+}
+
+dependency &quot;network&quot; {
+  config_path = &quot;../network&quot;
+}
+
+inputs = {
+  environment = &quot;staging&quot;
+  vpc_id      = dependency.network.outputs.vpc_id
+  subnet_ids  = dependency.network.outputs.private_subnet_ids
+}</code></pre></div>
+<p>What I like about it is that the application config states its own requirements while reusing shared conventions. A reviewer sees the module version and the upstream relationship in one place.</p>
+<p>Indirection has a cost, though. Someone reading the leaf file also has to understand the included configuration and input precedence. That&#x27;s why the hierarchy needed a guide and worked examples. Less duplication shouldn&#x27;t mean hiding everything behind inheritance nobody explains.</p>
+<h3 id="dependencies-are-a-graph-not-an-ordering-wish">Dependencies are a graph, not an ordering wish</h3>
+<p>A <code>dependency</code> block reads outputs from another Terragrunt unit. It doesn&#x27;t mean applying one unit also deploys its upstream. When both network and application change, the workflow needs a deliberate order and fresh outputs.</p>
+<p>For a multi-unit operation, dependency-aware orchestration can follow the graph. For independent Atlantis projects, the order has to live in the automation or be handled with staged changes. Turning on parallel plans and applies doesn&#x27;t give you safe ordering. <a href="https://docs.terragrunt.com/reference/hcl/blocks/">Terragrunt&#x27;s HCL reference describes these blocks</a>.</p>
+<p>I prefer small changes that set up the upstream contract first and then update the consumers. The plan is easier to read, and you don&#x27;t discover a missing output halfway through a big rollout.</p>
+<h2 id="state-design-mattered-as-much-as-directory-design">State design mattered as much as directory design</h2>
+<p>Our AWS configuration kept Terraform state in an encrypted S3 backend, with a key derived from the unit&#x27;s location and a DynamoDB table for locking. The GCP configuration used the same central S3 backend, under a separate GCP state-key prefix. Which cloud manages the resources and where the state lives were two separate decisions.</p>
+<p>That&#x27;s a specific detail of how we built it. It would be wrong to say all GCP state lived in GCS just because GCP resources were involved.</p>
+<p>This simplified version of the pattern leaves out account numbers, bucket names, and keys:</p>
+<div class="code-block"><span class="code-label">hcl</span><pre><code>remote_state {
+  backend = &quot;s3&quot;
+  config = {
+    bucket         = &quot;example-infrastructure-state&quot;
+    key            = &quot;aws/${path_relative_to_include()}/terraform.tfstate&quot;
+    region         = &quot;eu-central-1&quot;
+    encrypt        = true
+    dynamodb_table = &quot;example-terraform-locks&quot;
+  }
+}</code></pre></div>
+<p>It explains our design; it isn&#x27;t a recommendation to copy the backend config into a new project unchanged. Check locking options and credential mechanisms against your Terraform version and current platform standards.</p>
+<p>Giving each unit its own state narrowed the blast radius of an operation and made ownership easier to manage. It didn&#x27;t make the dependencies go away. State can contain sensitive values, so access to backend data needed tighter control than access to ordinary source code.</p>
+<p>Because the key depended on the path, renaming a directory could also mean moving state. Moving a unit needed a state migration plan; it wasn&#x27;t just tidying up files.</p>
+<h2 id="why-atlantis-and-what-an-ordinary-change-looked-like">Why Atlantis, and what an ordinary change looked like</h2>
+<p>Atlantis put the plan next to the code and the conversation. An engineer opened a pull request, the affected projects planned, reviewers read the proposed changes, and an approved apply used the saved plan. Our documented workflow also merged automatically after a successful apply.</p>
+<p>A normal change went like this:</p>
+<ol><li>Create a branch and change the relevant unit or module version.</li><li>Run local checks and inspect the diff before opening the pull request.</li><li>Let Atlantis produce the plan for the affected projects.</li><li>Review additions, modifications, replacements, and deletions, including dependency impact.</li><li>Obtain the required approval and a mergeable pull request.</li><li>Apply through Atlantis, inspect the result, and verify the resulting service behavior.</li></ol>
+<p>The server-side repository config required <code>approved</code> and <code>mergeable</code> for both apply and import. It used a custom Terragrunt workflow, with pre-workflow hooks that selected tooling and generated the project configuration.</p>
+<p>A generalized excerpt shows the core behavior:</p>
+<div class="code-block"><span class="code-label">yaml</span><pre><code>repos:
+  - id: github.com/example/infrastructure
+    apply_requirements: [approved, mergeable]
+    import_requirements: [approved, mergeable]
+    workflow: terragrunt
+
+workflows:
+  terragrunt:
+    plan:
+      steps:
+        - run: terragrunt plan -input=false -out=$PLANFILE
+        - run: terragrunt show -json $PLANFILE &gt; $SHOWFILE
+    apply:
+      steps:
+        - run: terragrunt apply -input=false $PLANFILE</code></pre></div>
+<p>Applying the saved plan ties the operation to exactly what was reviewed. If the code, the relevant state, or a dependency changes, regenerate and re-review the plan instead of assuming the old one still holds.</p>
+<p>We also supported imports and policy workflows. Both are powerful. An import needs a clear resource address and the existing resource&#x27;s identity, and the next plan should confirm the configuration really matches the imported object. Policy evaluation needs to read the actual plan and produce a result reviewers can make sense of.</p>
+<p>Our server config had a policy-check stage over plan JSON, with policy owners. Separate tooling turned IaC scanner findings into Atlantis policy results. Having a scanner in the image doesn&#x27;t prove every repository enforced every policy, though. What the configured workflow actually ran is what counts.</p>
+<h2 id="project-discovery-and-change-impact">Project discovery and change impact</h2>
+<p>A script discovered Terragrunt projects and generated <code>atlantis.yaml</code>. It created one project per discovered directory, named the workspace after its path, and set autoplan rules for Terraform, HCL, templates, and supporting files. It also turned on parallel plan and apply.</p>
+<p>Generating the project list meant adding a unit didn&#x27;t require hand-editing config. But discovering projects and working out change impact are different problems. A generator can find a unit without knowing that a shared parent config just changed how it behaves.</p>
+<p>Changing a shared account input or provider template, for example, can affect many leaf projects, and narrow file globs on each leaf may miss that. Likewise, a change in the module repository doesn&#x27;t reach a pinned consumer until its reference is bumped.</p>
+<p>For a new rollout, I&#x27;d test the change matrix explicitly: a leaf edit, a parent input edit, a shared provider edit, a module version bump, a new directory, and a dependency output change. Each case should plan exactly the projects you expect. I&#x27;d also cap concurrency instead of assuming every cloud API and backend can take unlimited parallel work.</p>
+<h2 id="two-locks-two-different-recovery-decisions">Two locks, two different recovery decisions</h2>
+<p>Atlantis project locks coordinate pull requests working on the same project. Terraform backend locks protect state during an operation, when locking is enabled and supported. They&#x27;re related, but they&#x27;re not the same lock. <a href="https://www.runatlantis.io/docs/locking.html">Atlantis documents project coordination</a>, and <a href="https://developer.hashicorp.com/terraform/language/state/locking">Terraform documents backend state locking</a>.</p>
+<p>That difference matters when something gets stuck. If an old pull request holds a project lock, find that pull request and make sure nothing is still running before releasing it. If the backend reports a state lock, find out who&#x27;s writing and what state they&#x27;re in before touching anything.</p>
+<p>Unlocking doesn&#x27;t prove the previous apply finished or rolled back. A failed apply may already have changed real resources. Recovery means reading the execution logs and current state, then producing a fresh plan.</p>
+<p>Our Terragrunt config also had backend locking turned off for plan operations. In a new implementation I&#x27;d revisit that on purpose rather than assume every command had the same locking guarantees. Documentation should describe the settings you actually run, not just what the tools are capable of.</p>
+<h2 id="how-we-connected-prometheus-and-grafana">How we connected Prometheus and Grafana</h2>
+<p>Our Kubernetes Atlantis module exposed Prometheus metrics at <code>/metrics</code>, with a <code>ServiceMonitor</code> that selected the Atlantis service and scraped its named HTTP port. It was a concrete integration in the module, not a vague &quot;we had monitoring somewhere.&quot;</p>
+<p>The shape was:</p>
+<div class="code-block"><span class="code-label">text</span><pre><code>Atlantis /metrics
+       |
+       v
+Kubernetes Service -&gt; ServiceMonitor -&gt; Prometheus
+                                           |
+                              +------------+-----------+
+                              |                        |
+                         Grafana views             Alert rules</code></pre></div>
+<p>A generalized monitor definition looks like this:</p>
+<div class="code-block"><span class="code-label">yaml</span><pre><code>apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: atlantis
+  namespace: platform
+spec:
+  selector:
+    matchLabels:
+      app: atlantis
+  endpoints:
+    - port: http
+      path: /metrics</code></pre></div>
+<p>Prometheus also has to select that ServiceMonitor and be able to reach the endpoint. Creating the custom resource on its own doesn&#x27;t prove anything is being scraped.</p>
+<p>Atlantis exposes metrics for operation success, errors, and timing. <a href="https://www.runatlantis.io/docs/stats">Its metrics reference lists the available families</a>. I&#x27;d build Grafana views around operation errors and durations, process health, and the Kubernetes workload, taking exact metric names and types from the running version rather than a dashboard copied from someone else&#x27;s install.</p>
+<p>A simple health panel:</p>
+<div class="code-block"><span class="code-label">promql</span><pre><code>up{job=&quot;atlantis&quot;}</code></pre></div>
+<p>The job label has to match your scrape configuration. For a version that exposes the documented autoplan counter, a useful error panel is:</p>
+<div class="code-block"><span class="code-label">promql</span><pre><code>increase(atlantis_cmd_autoplan_builder_execution_error[1h])</code></pre></div>
+<p>These are example panels; I don&#x27;t have our original dashboard expressions to show. For durations, check whether the metric is a histogram or a summary before writing a percentile query. A histogram query pasted over a summary gives you misleading or empty results.</p>
+<p>I&#x27;d keep automation health separate from infrastructure health. A successful Terraform apply doesn&#x27;t mean the application is healthy. And a crashing Atlantis pod can block infrastructure changes while production keeps serving traffic just fine. Grafana should make both situations easy to read.</p>
+<p>Useful signals include pod restarts, memory pressure, pending jobs, failed plans and applies, cloud permission failures, and how long engineers wait for a usable plan. Lock inventory and lock age may need extra instrumentation; don&#x27;t assume the default metrics have them.</p>
+<p>The platform could also scale Atlantis down on a schedule with KEDA, so time matters. A service that&#x27;s asleep on purpose shouldn&#x27;t raise the same alert as one that disappears during hours it&#x27;s supposed to be up.</p>
+<h2 id="how-i-would-phase-the-migration">How I would phase the migration</h2>
+<p>I led the infrastructure-code migration, but I&#x27;m not going to invent a detailed historical calendar for it. Here&#x27;s the plan I&#x27;d follow for the same design today.</p>
+<ol><li><strong>Inventory the existing units.</strong> Record state location, provider identity, tool versions, dependencies, owners, and which resources are already managed. Avoid importing or recreating resources blindly.</li><li><strong>Establish the repository contract.</strong> Define the provider hierarchy, state-key rules, module references, tagging, and the boundary between shared configuration and leaf inputs.</li><li><strong>Pilot a small non-production unit.</strong> Verify identity, remote state, project discovery, approval requirements, saved-plan application, and a no-change rerun.</li><li><strong>Exercise shared changes and recovery.</strong> Test parent-input impact, dependency order, stale plans, lock conflicts, and a controlled failed operation before broad migration.</li><li><strong>Move units in manageable groups.</strong> Preserve state ownership, stop duplicate writers, review plans for unexpected replacement, and keep a documented rollback or handback path.</li><li><strong>Measure and support adoption.</strong> Watch workflow errors and latency, update guides from real questions, and expand once another engineer can complete the normal path unaided.</li></ol>
+<p>What we ended up with was one way of working across two cloud providers, without pretending they were the same. The tools earned their place because each had a clear job, and because review, state, module versions, monitoring, and recovery were treated as parts of a single workflow.</p>
+<p>The module contract is covered in <a href="/RamezWasfy/blog/versioned-modules.html">Versioned Terraform modules and pre-commit checks</a>. The related runtime experiment is covered in <a href="/RamezWasfy/blog/atlantis-on-lambda.html">Running Atlantis on Lambda</a>.</p>
+<nav class="article-nav" aria-label="After this article"><a class="next-note line-i" href="/RamezWasfy/blog/versioned-modules.html"><span class="next-label">Next stop</span><span class="next-title">Versioned Terraform modules and checks before review</span><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg></a><div class="after-links"><a href="/RamezWasfy/#writing">Browse the other notes</a><a href="https://linkedin.com/in/rameznabilwasfy">Connect on LinkedIn</a></div></nav>
+</div></div>
+</main><footer class="site-footer"><div class="wrap footer-inner"><span>&copy; 2026 Ramez Wasfy</span><span>Infrastructure, with the people using it in mind.</span></div></footer></body></html>

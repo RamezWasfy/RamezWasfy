@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://ramezwasfy.github.io/RamezWasfy/sitemap.xml
